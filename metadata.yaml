@@ -1,0 +1,9 @@
+name: astrbot_plugin_relay_talk
+display_name: 传话筒
+author: dafeiyu-tools
+version: 3.5.0
+desc: 配置绑定两个会话后启用；AI 结合上下文判断带话与回话，无需指明对象；可选潜台词翻译与插件内分段，回执自己现写
+repo: 无
+astrbot_version: ">=4.5.7"
+support_platforms:
+  - aiocqhttp

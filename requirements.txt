@@ -1,0 +1,2 @@
+# 无第三方依赖：只使用 AstrBot API 与 Python 标准库。
+# 若你的实例把 MessageChain 放在别的模块，见 README「版本核对清单」。

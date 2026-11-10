@@ -1,0 +1,147 @@
+{
+  "session_a": {
+    "description": "【必填】左边那位（A）的会话 UMO。让 A 私聊机器人发 /sid，把返回的 unified_msg_origin 原样贴进来，形如 aiocqhttp:FriendMessage:10001。没填或只填一个，插件完全休眠",
+    "type": "string",
+    "default": ""
+  },
+  "session_b": {
+    "description": "【必填】右边那位（B）的会话 UMO，同样用 /sid 获取。必须与 session_a 不同，且两个会话都要在 AstrBot 访问控制白名单里",
+    "type": "string",
+    "default": ""
+  },
+  "name_a": {
+    "description": "A 的本名（可选，给 AI 一个初始认识）。也可让他聊天时自己说，AI 会记进画像",
+    "type": "string",
+    "default": ""
+  },
+  "call_a": {
+    "description": "AI 怎么称呼 A（可选，例如「泽哥」）。留空则 AI 从对话里自己学",
+    "type": "string",
+    "default": ""
+  },
+  "name_b": {
+    "description": "B 的本名（可选）",
+    "type": "string",
+    "default": ""
+  },
+  "call_b": {
+    "description": "AI 怎么称呼 B（可选，例如「小李」）",
+    "type": "string",
+    "default": ""
+  },
+  "mode": {
+    "description": "判定档位。context（默认，推荐）= 结合上下文判断：刚被递过话或出现对方指代才叫 AI 判，其余完全放行零打扰，能正常闲聊；always = 每句都判，最灵敏最贵；natural = 旧版关键词粗筛，最省但会漏。旧名 smart 自动归到 context。运行时用 /话筒 判定 <档位> 覆盖",
+    "type": "string",
+    "default": "context"
+  },
+  "smart_min_chars": {
+    "description": "context 档：去掉表情/标点后短于几个字就直接放行不判定",
+    "type": "int",
+    "default": 2
+  },
+  "context_rounds": {
+    "description": "对话上下文窗口保留几轮（两边合计约 2× 此数）。闲聊也会记进来，否则 AI 看不到话题怎么延续、分不清「在回对方的话」还是「继续闲聊」。设 0 关闭上下文记录",
+    "type": "int",
+    "default": 6
+  },
+  "context_reply_timeout_minutes": {
+    "description": "上一次递话作为「等回复线索」保留几分钟，超时后不再提示判定器「当前这句可能是在回它」",
+    "type": "int",
+    "default": 60
+  },
+  "store_chat_context": {
+    "description": "是否把两人跟机器人聊的话（截断 120 字）记进本地 state 作为上下文。关掉后 AI 只能看到递话记录，判断回复的能力会下降",
+    "type": "bool",
+    "default": true
+  },
+  "confirm_timeout_minutes": {
+    "description": "发起侧确认：问了发话方「要不要带过去」后最多等几分钟，超时自动作罢",
+    "type": "int",
+    "default": 5
+  },
+  "confirm_max_rounds": {
+    "description": "发起侧确认：答非所问时最多再问几轮，超过就不缠人了",
+    "type": "int",
+    "default": 2
+  },
+  "relay_segment": {
+    "description": "【可选，默认关】插件内模拟分段：把递给对方的话按标点切成多条、逐条发送并加间隔。⚠️ 不是 AstrBot 核心分段——主动消息不进 RespondStage，核心分段/字数阈值/组件隔离一律不生效；也不带 TTS/表情段。可用 /话筒 分段 开/关 在线改",
+    "type": "bool",
+    "default": false
+  },
+  "segment_min_chars": {
+    "description": "分段：短于几个字的句子并到相邻段，避免切出「嗯。」这种碎条",
+    "type": "int",
+    "default": 8
+  },
+  "segment_max_parts": {
+    "description": "分段：最多切成几条，超出的并到最后一条",
+    "type": "int",
+    "default": 4
+  },
+  "segment_delay_min": {
+    "description": "分段：两条之间最短间隔（秒）",
+    "type": "float",
+    "default": 0.8
+  },
+  "segment_delay_max": {
+    "description": "分段：两条之间最长间隔（秒）",
+    "type": "float",
+    "default": 1.6
+  },
+  "judge_provider_id": {
+    "description": "判定 + 转述用的模型 Provider ID。留空用当前会话默认模型。建议填便宜快模型：每轮只调一次，但要判意图、读画像、写 JSON",
+    "type": "string",
+    "default": ""
+  },
+  "trigger_hints": {
+    "description": "传话意图候选短语，逗号分隔。留空用内置表。只是粗筛，真正判断交给模型",
+    "type": "string",
+    "default": ""
+  },
+  "trigger_regex": {
+    "description": "可选的额外召回正则，兜住「类似你跟他说」的非逐字说法。留空用内置宽松正则",
+    "type": "string",
+    "default": ""
+  },
+  "learn_profiles": {
+    "description": "每轮传话后，让 AI 把「对两人新多出来的一条认识」写进画像。这是它越来越懂两人的来源",
+    "type": "bool",
+    "default": true
+  },
+  "history_rounds": {
+    "description": "保留最近几轮递话记录给判定器看。只存转述后的话和 AI 自己加的话，不存原文",
+    "type": "int",
+    "default": 4
+  },
+  "max_input_chars": {
+    "description": "单条原话最大字数，超出截断",
+    "type": "int",
+    "default": 500
+  },
+  "max_output_chars": {
+    "description": "转述正文最大字数（AI 自己加的那句另有 120 字上限）",
+    "type": "int",
+    "default": 240
+  },
+  "ack_sender": {
+    "description": "是否给发话方一句轻回执。回执由 AI 每轮自己现写（JSON 的 ack 字段），没有固定模板；AI 没写就不发",
+    "type": "bool",
+    "default": true
+  },
+  "style_hint": {
+    "description": "整体味道的额外约束，注入到判定器。也可用 /话筒 风格 在线改",
+    "type": "string",
+    "default": ""
+  },
+  "subtext_mode": {
+    "description": "【潜台词翻译】默认关。开启后除了转述，AI 还猜一句发话方没说出口的意思，必须带『我猜/说不定』揣测标记，绝不写成断言、绝不读心、绝不把拒绝猜成答应；拿不准就不猜；猜测不写进画像。也可用 /话筒 潜台词 开/关 在线改",
+    "type": "bool",
+    "default": false
+  },
+  "subtext_hint": {
+    "description": "潜台词模式的额外尺度约束，例如『猜得保守一点，猜错就别猜』『只猜语气别猜动机』『别往情绪上猜』。空则用内置默认边界",
+    "type": "string",
+    "default": ""
+  }
+}
