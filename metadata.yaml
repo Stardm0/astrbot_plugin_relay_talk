@@ -1,7 +1,7 @@
 name: astrbot_plugin_relay_talk
 display_name: 传话筒
 author: dafeiyu-tools
-version: 3.5.0
+version: 1.0.0
 desc: 在配置里绑定两个会话后，AI 就成了两人之间会自己拿捏分寸的中间人：不用下指令、不用写对象，随口一句「你帮我问问他」就带过去，对方回话也会自动带回。转述不是原文照搬，会保住事实、放软语气，还能看情况替人多说一句关心或打个圆场；可选潜台词翻译与插件内分段，回执每次现写。未绑定时插件完全休眠，纯闲聊不拦截、不追问。
 repo: 无
 astrbot_version: ">=4.5.7"
