@@ -287,6 +287,7 @@ COMMAND_LIST_TEXT = """【传话筒 · 指令一览】
   /话筒 状态 / 检查 / status / check  同上
   /话筒 指令 / commands / help       本清单
   /话筒 自检 / selftest / verify     一键核验指令注册与绑定（不调模型）
+  /话筒 校验 / 验指令                逐条校验全部指令解析（零模型/零发送）
   /话筒 上下文 / context            查看最近对话上下文与上一次递过去的话
   /话筒 潜台词                      查看潜台词翻译开关
   /话筒 判定                        查看当前判定档位
@@ -321,14 +322,146 @@ COMMAND_LIST_TEXT = """【传话筒 · 指令一览】
 
 配对只在 WebUI 插件配置里改：session_a / session_b（各私聊发 /sid 拿 UMO），
 保存后必须重载插件。聊天里没有绑定/解绑/换人的指令。
+
+指令写法很宽容：/话筒 判定 context 和 /话筒 判定：context 都行，全角斜杠、
+零宽字符、@机器人 前缀、[主人(QQ号)] 这类 At 显示段都会被自动清掉；
+英文别名大小写不敏感（STATUS / HELP 亦可）。
 """
+
+
+# ---------------------------------------------------------------- 指令矩阵（单一数据源）
+# 运行时 /话筒 校验、离线 _selftest.py、README 第三节三处共用同一份，
+# 杜绝「文档写了一条、代码其实不认」。
+# 字段：(用户输入原文, 期望 head, 期望 rest, 类型, 离线自检期望回显关键字)
+# 类型：admin=纯查询 / state=改状态 / relay=真传话 / verify=运行时校验 / relaycmd=/带话路径
+COMMAND_MATRIX: tuple = (
+    # --- 传话 ---
+    ("/带话 我晚点到",              "带", "我晚点到",   "relaycmd", "抽不开身"),
+    ("/话筒 带 我晚点到",           "带",   "我晚点到",   "relay",     "抽不开身"),
+    ("/话筒 传 我晚点到",           "带",   "我晚点到",   "relay",     "抽不开身"),
+    ("/话筒 传话 我晚点到",         "带", "我晚点到",   "relay",     "抽不开身"),
+    ("/话筒 说 我晚点到",           "带",   "我晚点到",   "relay",     "抽不开身"),
+    ("/话筒 带：我晚点到",          "带",   "我晚点到",   "relay",     "抽不开身"),
+    ("/带话：我晚点到",             "带", "我晚点到",   "relaycmd", "抽不开身"),
+    # --- 查看 ---
+    ("/话筒",                       "状态", "",           "admin",     "传话筒状态"),
+    ("/话筒 状态",                  "状态", "",           "admin",     "传话筒状态"),
+    ("/话筒 检查",                  "状态", "",           "admin",     "传话筒状态"),
+    ("/话筒 status",                "状态", "",           "admin",     "传话筒状态"),
+    ("/话筒 check",                 "状态", "",           "admin",     "传话筒状态"),
+    ("/话筒 STATUS",                "状态", "",           "admin",     "传话筒状态"),
+    ("/话筒 指令",                  "指令", "",           "admin",     "指令一览"),
+    ("/话筒 commands",              "指令", "",           "admin",     "指令一览"),
+    ("/话筒 help",                  "指令", "",           "admin",     "指令一览"),
+    ("/话筒 HELP",                  "指令", "",           "admin",     "指令一览"),
+    ("/话筒 自检",                  "自检", "",           "admin",     "全部就绪"),
+    ("/话筒 selftest",              "自检", "",           "admin",     "全部就绪"),
+    ("/话筒 verify",                "自检", "",           "admin",     "全部就绪"),
+    ("/话筒 校验",                  "校验", "",           "verify",    "全部通过"),
+    ("/话筒 验指令",                "校验", "",           "verify",    "全部通过"),
+    ("/话筒 上下文",                "上下文", "",         "admin",     "最近对话上下文"),
+    ("/话筒 context",               "上下文", "",         "admin",     "最近对话上下文"),
+    ("/话筒 潜台词",                "潜台词", "",         "admin",     "潜台词翻译：关闭"),
+    ("/话筒 subtext",               "潜台词", "",         "admin",     "潜台词翻译：关闭"),
+    ("/话筒 判定",                  "判定", "",           "admin",     "判定档位："),
+    ("/话筒 mode",                  "判定", "",           "admin",     "判定档位："),
+    ("/话筒 分段",                  "分段", "",           "admin",     "插件内分段：关"),
+    ("/话筒 segment",               "分段", "",           "admin",     "插件内分段：关"),
+    ("/话筒 待确认",                "待确认", "",         "admin",     "当前没有在等你点头"),
+    ("/话筒 confirm",               "待确认", "",         "admin",     "当前没有在等你点头"),
+    # --- 开关与维护 ---
+    ("/话筒 潜台词 开",             "潜台词", "开",        "state",     "潜台词翻译已开启"),
+    ("/话筒 潜台词 关",             "潜台词", "关",        "state",     "潜台词翻译已关闭"),
+    ("/话筒 潜台词 清除配置",       "潜台词", "清除配置",  "state",     "已清除运行时覆盖"),
+    ("/话筒 潜台词 尺度",           "潜台词", "尺度",      "state",     "当前潜台词尺度"),
+    ("/话筒 潜台词 尺度 猜保守点",  "潜台词", "尺度 猜保守点", "state", "好，之后按这个分寸猜"),
+    ("/话筒 潜台词 尺度：猜保守点", "潜台词", "尺度：猜保守点", "state", "好，之后按这个分寸猜"),
+    ("/话筒 潜台词：开",            "潜台词", "开",        "state",     "潜台词翻译已开启"),
+    ("/话筒 判定 context",          "判定", "context",    "state",     "判定档位已切到 context"),
+    ("/话筒 判定 always",           "判定", "always",     "state",     "判定档位已切到 always"),
+    ("/话筒 判定 natural",          "判定", "natural",    "state",     "判定档位已切到 natural"),
+    ("/话筒 判定 清除配置",         "判定", "清除配置",   "state",     "已回到配置面板值"),
+    ("/话筒 判定：context",         "判定", "context",    "state",     "判定档位已切到 context"),
+    ("/话筒 分段 开",               "分段", "开",         "state",     "插件内分段已开启"),
+    ("/话筒 分段 关",               "分段", "关",         "state",     "插件内分段已关闭"),
+    ("/话筒 分段 清除配置",         "分段", "清除配置",   "state",     "已回到配置面板"),
+    ("/话筒 分段：开",              "分段", "开",         "state",     "插件内分段已开启"),
+    ("/话筒 上下文 清",             "上下文", "清",        "state",     "都清掉了"),
+    ("/话筒 待确认 清",             "待确认", "清",        "state",     "那句就先不带了"),
+    ("/话筒 清空",                  "清空", "",           "state",     "都已清空"),
+    ("/话筒 reset",                 "清空", "",           "state",     "都已清空"),
+    ("/话筒 风格 更松弛一点",       "风格", "更松弛一点", "state",     "好，之后按这个味道"),
+    ("/话筒 style 更松弛一点",      "风格", "更松弛一点", "state",     "好，之后按这个味道"),
+    ("/话筒 风格：更松弛一点",      "风格", "更松弛一点", "state",     "好，之后按这个味道"),
+    ("/话筒 称呼 老泽",             "称呼", "老泽",       "state",     "好，以后叫你"),
+    ("/话筒 call 老泽",             "称呼", "老泽",       "state",     "好，以后叫你"),
+    ("/话筒 称呼：老泽",            "称呼", "老泽",       "state",     "好，以后叫你"),
+    # --- 解析鲁棒性回归（QQ 实测：At 段被拼进 message_str） ---
+    ("[主人(2581793700)]/话筒 自检",  "自检", "",         "admin",     "全部就绪"),
+    ("[主人(2581793700)]/话筒 检查",  "状态", "",         "admin",     "传话筒状态"),
+    ("/话筒 检查[主人(2581793700)]",  "状态", "",         "admin",     "传话筒状态"),
+    ("[主人(2581793700)]/带话 晚安",  "带", "晚安",     "relaycmd", "抽不开身"),
+    ("[CQ:at,qq=2581793700] /话筒 自检", "自检", "",     "admin",     "全部就绪"),
+    ("@机器人(2581793700) /话筒 自检", "自检", "",        "admin",     "全部就绪"),
+    ("@机器人 /话筒 帮助",             "指令", "",        "admin",     "指令一览"),
+    ("／话筒 自检",                    "自检", "",        "admin",     "全部就绪"),
+    ("/话筒\u200b自检",                "自检", "",        "admin",     "全部就绪"),
+    ("话筒 自检",                      "自检", "",        "admin",     "全部就绪"),
+    ("自检",                           "自检", "",        "admin",     "全部就绪"),
+    ("状态",                           "状态", "",        "admin",     "传话筒状态"),
+)
+# 一级指令名（全部小写；中文 lower 后不变）
+ALL_KNOWN_HEADS = frozenset({
+    "带", "带话", "传", "传话", "说",
+    "状态", "status", "检查", "check",
+    "指令", "commands", "help", "帮助",
+    "自检", "selftest", "verify",
+    "校验", "verify_cmds", "验指令", "检查指令",
+    "上下文", "context",
+    "潜台词", "subtext",
+    "判定", "mode", "档位",
+    "分段", "segment",
+    "待确认", "confirm",
+    "清空", "reset",
+    "风格", "style",
+    "称呼", "call",
+})
+
+# 别名 → 规范 head。解析层统一输出规范值，cmd_admin 的分支、运行时校验、
+# 矩阵期望三处都用同一套，避免「文档写 status、代码返回 check」这类错位。
+HEAD_CANON: dict = {
+    "带话": "带", "传": "带", "传话": "带", "说": "带",
+    "status": "状态", "check": "状态", "检查": "状态",
+    "commands": "指令", "help": "指令", "帮助": "指令",
+    "selftest": "自检", "verify": "自检",
+    "verify_cmds": "校验", "验指令": "校验", "检查指令": "校验",
+    "context": "上下文", "subtext": "潜台词", "mode": "判定", "档位": "判定",
+    "segment": "分段", "confirm": "待确认", "reset": "清空",
+    "style": "风格", "call": "称呼",
+}
+
+# head 仍不认识时的关键字兜底（长词在前，避免短词误伤）
+HEAD_FALLBACK: tuple = (
+    ("验指令", "校验"), ("检查指令", "校验"), ("verify_cmds", "校验"), ("校验", "校验"),
+    ("selftest", "自检"), ("自检", "自检"), ("verify", "自检"),
+    ("commands", "指令"), ("help", "指令"), ("帮助", "指令"), ("指令", "指令"),
+    ("context", "上下文"), ("上下文", "上下文"),
+    ("subtext", "潜台词"), ("潜台词", "潜台词"),
+    ("segment", "分段"), ("分段", "分段"),
+    ("confirm", "待确认"), ("待确认", "待确认"),
+    ("判定", "判定"), ("档位", "判定"), ("mode", "判定"),
+    ("style", "风格"), ("风格", "风格"),
+    ("call", "称呼"), ("称呼", "称呼"),
+    ("reset", "清空"), ("清空", "清空"),
+    ("status", "状态"), ("check", "状态"), ("检查", "状态"), ("状态", "状态"),
+)
 
 
 @register(
     "astrbot_plugin_relay_talk",
     "dafeiyu-tools",
     "传话筒：配置绑定两个会话后启用；AI 结合上下文判断带话与回话，可选潜台词/分段，回执自己现写",
-    "3.5.0",
+    "1.0.2",
 )
 class RelayTalkPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
@@ -1290,6 +1423,8 @@ class RelayTalkPlugin(Star):
     async def cmd_relay(self, event: AstrMessageEvent):
         """短指令：/带话 <内容>。不写对象，配置里的另一位自动就是收话方。"""
         whole = self._command_text(event)
+        # _strip_command 内部会再清洗一次 At 段；正文里的冒号刻意不动，
+        # 避免把「我晚点到：记得吃饭」这种真实内容改掉。
         body = self._strip_command(whole, ("带话", "话筒"))
         try:
             event.stop_event()
@@ -1306,7 +1441,7 @@ class RelayTalkPlugin(Star):
         硬门槛：配对必须先在 AstrBot 配置里填好两个会话。
         没绑好时插件完全休眠 —— 不拦事件、不调模型、不发任何消息。
         """
-        text = (event.message_str or "").strip()
+        text = self._clean_input(getattr(event, "message_str", "") or "")
         if not text or text.startswith(("/", "／")):
             return  # 指令交给 /话筒，普通闲聊不干预
 
@@ -1446,25 +1581,11 @@ class RelayTalkPlugin(Star):
         except Exception:
             pass
         whole = self._command_text(event)
-        body = self._strip_command(whole, ("话筒", "带话"))
-        parts = body.split(maxsplit=1)
-        head = parts[0] if parts else ""
-        rest = parts[1].strip() if len(parts) > 1 else ""
+        head, rest = self._parse_text(whole)
         src = event.unified_msg_origin
-
-        # 兜底：不同版本给 message_str 的形态不一致（完整原文 / 只剩参数 /
-        # 带零宽字符 / 带 @ 前缀），只要原文里出现状态类关键字就按状态处理。
-        # 空参数也直接给状态总览 —— 不要再掉进「只回帮助」的兜底。
-        known = ("带", "带话", "传", "传话", "说", "状态", "status", "检查",
-                 "check", "清空", "reset", "风格", "style", "称呼", "call",
-                 "上下文", "context", "指令", "commands", "help",
-                 "自检", "selftest", "verify", "潜台词", "subtext",
-                 "判定", "mode", "分段", "segment", "待确认", "confirm")
-        if not head or head not in known:
-            if re.search(r"检查|状态|check|status", whole, re.I):
-                head = "状态"
-            elif not head:
-                head = "状态"
+        # _parse_text 已统一处理：At 段清洗、多来源取原文、全角/半角冒号紧贴、
+        # 英文大小写、以及「head 不认识但原文含指令关键字」的兜底。
+        # 空参数也返回「状态」，不会再掉进「只回指令清单」的兜底。
 
         if head in ("带", "带话", "传", "传话", "说"):
             await self._manual_relay(event, rest)
@@ -1514,7 +1635,7 @@ class RelayTalkPlugin(Star):
             return
 
         if head in ("上下文", "context"):
-            val = rest.strip().lower()
+            val = self._norm_colon(rest).lower()
             if val in ("清", "清除", "clear", "reset", "清空"):
                 async with self.lock:
                     self.state["turns"] = []
@@ -1545,7 +1666,7 @@ class RelayTalkPlugin(Star):
             return
 
         if head in ("潜台词", "subtext"):
-            val = rest.strip()
+            val = self._norm_colon(rest)
             low = val.lower()
             sub = val.split(maxsplit=1)
             sub_head = sub[0] if sub else ""
@@ -1609,7 +1730,7 @@ class RelayTalkPlugin(Star):
             return
 
         if head in ("判定", "mode"):
-            val = rest.strip().lower()
+            val = self._norm_colon(rest).lower()
             modes = ("context", "smart", "always", "natural")
             if val in ("", "状态", "status"):
                 desc = {
@@ -1646,7 +1767,7 @@ class RelayTalkPlugin(Star):
             return
 
         if head in ("分段", "segment"):
-            val = rest.strip().lower()
+            val = self._norm_colon(rest).lower()
             override = self.state.get("segment_override")
             on = bool(override) if override is not None else bool(self._c("relay_segment", False))
             if val in ("", "状态", "status"):
@@ -1684,7 +1805,7 @@ class RelayTalkPlugin(Star):
             return
 
         if head in ("待确认", "confirm"):
-            if rest.strip() in ("清", "清除", "clear", "reset", "算了"):
+            if self._norm_colon(rest).lower() in ("清", "清除", "clear", "reset", "算了"):
                 async with self.lock:
                     self._clear_confirm()
                     self._save_state()
@@ -1703,7 +1824,11 @@ class RelayTalkPlugin(Star):
             )
             return
 
-        if head in ("指令", "commands", "help"):
+        if head in ("校验", "verify_cmds", "验指令", "检查指令"):
+            await self._send(src, self._verify_commands())
+            return
+
+        if head in ("指令", "commands", "help", "帮助"):
             await self._send(src, COMMAND_LIST_TEXT)
             return
 
@@ -1779,41 +1904,99 @@ class RelayTalkPlugin(Star):
         await self._send(
             src,
             COMMAND_LIST_TEXT
-            + (f"\n[诊断] 本次没认出参数「{head}」，原文：{whole[:60]}" if head else ""),
+            + (f"\n[诊断] 本次没认出参数「{head}」，清洗后原文：{self._clean_input(whole)[:60]}" if head else ""),
         )
 
     # ------------------------------------------------------------------ 指令文本解析
 
     @staticmethod
-    def _command_text(event) -> str:
-        """鲁棒取指令原文。
+    def _clean_input(text: str) -> str:
+        """清洗用户原文。
 
-        AstrBot 各版本对 event.message_str 的处理不一致：有的保留完整
-        「/话筒 检查」，有的只给参数「检查」，群聊还可能带 @ 前缀或零宽字符。
-        这里把几个来源都捞出来，优先取含指令名的那份，再清掉不可见字符。
+        ⚠️ QQ 实测踩坑：陪伴插件 / NapCat 会把 At 组件渲染成
+        ``[主人(2581793700)]`` 拼进 message_str。旧版只剥 CQ 码和 @前缀，
+        head 就被解析成 ``[主人(2581793700)]/话筒`` → 除「检查/状态」被关键字
+        兜底误救外，自检 / 判定 / 分段 / 潜台词 / 风格 / 称呼 **全部掉进
+        「只回指令清单」的兜底**。这里做**全局**删除（不只前缀），因为 At 段
+        也可能夹在指令名与参数之间，或拼在参数尾部。
+
+        刻意不吃 ``[旺柴]``：它没有「括号 + 5~12 位数字」，表情标记必须保留。
         """
-        cands = []
-        raw = getattr(event, "message_str", None)
-        if isinstance(raw, str) and raw.strip():
-            cands.append(raw)
+        t = (text or "").strip()
+        t = re.sub(r"[\u200b-\u200f\ufeff\u00a0]", "", t)
+        # 方括号形态的 At 段：CQ 码 / [主人(QQ)] / [@昵称]
+        t = re.sub(r"\[CQ:at[^\]]*\]", "", t, flags=re.I)
+        t = re.sub(r"\[(?:主人|@?[^\]\(（]{0,12})\s*[（(]\s*\d{5,12}\s*[)）]\s*\]", "", t)
+        t = re.sub(r"\[@[^\]]{0,24}\]", "", t)
+        t = re.sub(r"<at[^>]*>.*?</at>", "", t, flags=re.S | re.I)
+        # 前缀形态（可能连着好几个）：@某人 / @某人(QQ)
+        for _ in range(4):
+            before = t
+            t = re.sub(r"^\s*@[^\s/／]+\s*", "", t)
+            if t == before:
+                break
+        return t.strip()
+
+    @staticmethod
+    def _plain_from_event(event) -> str:
+        """从消息链里只拼 Plain 段，**跳过 At / 图片 / 语音 / 表情等组件**。
+
+        这比 message_str 可靠：框架给 command 处理器的 message_str 可能只剩
+        At 段的显示文本，真正的指令在 message_obj.message 的 Plain 段里。
+        """
         obj = getattr(event, "message_obj", None)
         segs = getattr(obj, "message", None) if obj is not None else None
-        if isinstance(segs, (list, tuple)):
-            buf = ""
-            for seg in segs:
-                t = getattr(seg, "text", None)
-                if isinstance(t, str):
-                    buf += t
-            if buf.strip():
-                cands.append(buf)
+        if isinstance(segs, str):
+            return segs.strip()
+        if not isinstance(segs, (list, tuple)):
+            return ""
+        parts: list[str] = []
+        for seg in segs:
+            name = type(seg).__name__
+            if "At" in name or name in ("Image", "Record", "Face",
+                                        "Reply", "File", "Video", "Poke"):
+                continue
+            t = getattr(seg, "text", None)
+            if isinstance(t, str):
+                parts.append(t)
+            elif isinstance(seg, str):
+                parts.append(seg)
+        return "".join(parts).strip()
+
+    @staticmethod
+    def _norm_colon(text: str) -> str:
+        """把「head：rest」「head, rest」规范化成「head rest」（只处理第一个词）。
+
+        全角/半角冒号紧贴时 ``split(maxsplit=1)`` 会把 ``判定：context`` 整个
+        当成 head，掉进兜底。刻意 count=1：传话正文里的冒号不能动。
+        """
+        return re.sub(r"^([^\s:：,，]+)\s*[:：,，]\s*", r"\1 ",
+                      text or "", count=1).strip()
+
+    @classmethod
+    def _command_text(cls, event) -> str:
+        """鲁棒取指令原文：多来源 + 清洗 + 优先取含指令名的那份。"""
+        cands: list[str] = []
+        raw = getattr(event, "message_str", None)
+        if isinstance(raw, str) and raw.strip():
+            cands.append(cls._clean_input(raw))
+        plain = cls._plain_from_event(event)
+        if plain:
+            cands.append(cls._clean_input(plain))
+        cands = [c for c in dict.fromkeys(cands) if c]
         if not cands:
             return ""
+        # 优先取能解析出已知指令的那份（避免选到只剩 At 噪声的长文本）
+        for c in cands:
+            h, _ = cls._parse_text(c)
+            if h in ALL_KNOWN_HEADS and re.search(
+                    r"话筒|带话|状态|检查|自检|指令|校验|判定|分段|潜台词|"
+                    r"上下文|待确认|风格|称呼|清空|带|传|说|status|check|help|"
+                    r"mode|segment|context|subtext|confirm|style|call|reset|verify",
+                    c, flags=re.I):
+                return c
         named = [c for c in cands if re.search(r"话筒|带话", c)]
-        text = max(named or cands, key=len)
-        # 零宽空格 / BOM / 不换行空格 / @某某 之类的前导噪声
-        text = re.sub(r"[\u200b-\u200f\ufeff\u00a0]", "", text)
-        text = re.sub(r"^\s*@\S+\s*", "", text)
-        return text.strip()
+        return max(named or cands, key=len)
 
     @staticmethod
     def _strip_command(text: str, names) -> str:
@@ -1821,12 +2004,68 @@ class RelayTalkPlugin(Star):
 
         只剥一次是故意的：正文若恰好以「带话」「话筒」开头，不能被吃掉。
         """
+        text = RelayTalkPlugin._clean_input(text or "")
         text = re.sub(r"^\s*(?:[/／@\s]+|@\S+\s*)+", "", text).strip()
         for n in names:
-            stripped = re.sub(r"^" + re.escape(n) + r"\s*[:：]?\s*", "", text, count=1)
+            stripped = re.sub(
+                r"^" + re.escape(n) + r"\s*[:：,，]?\s*", "", text, count=1
+            )
             if stripped != text:
                 return stripped.strip()
         return text
+
+    @classmethod
+    def _parse_text(cls, text: str, names=("话筒", "带话")) -> tuple[str, str]:
+        """纯函数：原文 → (规范 head, rest)。运行时校验与离线自检共用。"""
+        t = cls._norm_colon(cls._strip_command(text, names))
+        parts = t.split(maxsplit=1)
+        head = parts[0].strip().lower() if parts else ""
+        rest = parts[1].strip() if len(parts) > 1 else ""
+        if head and head not in ALL_KNOWN_HEADS:
+            low = t.lower()
+            for kw, canon in HEAD_FALLBACK:
+                if kw in low:
+                    return canon, rest
+        head = head or "状态"
+        return HEAD_CANON.get(head, head), rest
+
+    def _verify_commands(self) -> str:
+        """运行时全量指令校验：逐条跑解析层，零模型 / 零发送 / 零状态改动。
+
+        只验证「解析 + 分支存在」。**是否真正生效**（状态变化、真的把话递到
+        对端）由 `_selftest.py` 离线逐条实跑，见 README 3.5 节 —— 运行时
+        不能真去执行 `/话筒 清空` 之类，否则用户查一次就把数据清了。
+        """
+        bad: list[str] = []
+        for raw, want_head, want_rest, kind, _expect in COMMAND_MATRIX:
+            if kind == "relaycmd":
+                # /带话 走 cmd_relay：剥掉指令名后剩下的**整体**是传话正文，
+                # 不存在「head」概念，固定记作「带话」再校验正文洁净度。
+                head = "带"
+                rest = self._strip_command(raw, ("带话", "话筒"))
+            else:
+                head, rest = self._parse_text(raw)
+            if head != want_head:
+                bad.append(f"「{raw}」→ head={head!r}，期望 {want_head!r}")
+            elif want_rest and rest != want_rest:
+                bad.append(f"「{raw}」→ rest={rest!r}，期望 {want_rest!r}")
+            elif head not in ALL_KNOWN_HEADS:
+                bad.append(f"「{raw}」→ head={head!r} 没有对应处理分支")
+        total = len(COMMAND_MATRIX)
+        ok = total - len(bad)
+        lines = [
+            "传话筒 · 指令校验（解析层，零模型 / 零发送 / 零状态改动）",
+            f"  解析：{ok}/{total} 通过",
+            f"  已注册一级指令：{len(ALL_KNOWN_HEADS)} 个",
+            "  生效层（状态变化 / 真的把话递给另一位）：跑 python _selftest.py",
+        ]
+        if bad:
+            lines.append("  异常：")
+            lines.extend(f"    - {b}" for b in bad[:8])
+            lines.append("  结论：有不一致 ❌")
+        else:
+            lines.append("  结论：全部通过 ✅")
+        return "\n".join(lines)
 
     async def terminate(self):
         async with self.lock:

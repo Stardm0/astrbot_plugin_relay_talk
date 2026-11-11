@@ -4,12 +4,11 @@
 跑法： python _selftest.py
 仅用于开发期自查，不随插件加载（文件名不是 main.py，无 @register）。
 
-v3.5 覆盖重点：
-  · 上下文闸门：闲聊零调用零打扰、有带话意思才判
-  · B 回复 A 的话 → 同样走 relay 带回去
-  · 轻回执由 AI 自己现写，无固定模板
-  · confirm 询问与重试文案也由 AI 生成
-  · 强力模式已整体移除，分段不再与任何模式互斥
+1.0.2 覆盖重点（指令解析全量修复）：
+  · COMMAND_MATRIX 单一数据源，运行时 /话筒 校验 与离线实跑逐条对齐
+  · At 段 [主人(QQ号)] / CQ:at / @前缀 清洗，消息链跳过非 Plain 组件
+  · 全角半角冒号紧贴、英文大小写、多来源取原文、关键字兜底
+  · 原有覆盖：上下文闸门、来回传话、AI 现写回执、confirm、潜台词
 """
 import asyncio
 import importlib.util
@@ -61,6 +60,13 @@ class _Chain:
 class _Plain:
     def __init__(self, t):
         self.text = t
+
+
+class _At:
+    """模拟真实 AstrBot 的 At 组件（有 text 属性，但不是 Plain）。"""
+    def __init__(self, qq):
+        self.qq = qq
+        self.text = f"[主人({qq})]"
 
 
 class _MsgObj:
@@ -724,6 +730,156 @@ async def main():
         keys = set(re.findall(r"(?<!\{)\{([a-zA-Z_]\w*)\}(?!\})", p))
         p.format(**{k: "X" for k in keys})
         check("format OK: " + nm, True)
+
+    # ==================================================================
+    # 16. 全量指令矩阵（单一数据源）：逐条解析 + 逐条实跑生效
+    #    复现用户报的「好多指令没被正确解析生效」
+    # ==================================================================
+    M = mod.COMMAND_MATRIX
+    check("矩阵非空", len(M) >= 60, len(M))
+
+    parse_bad = []
+    for raw, want_head, want_rest, kind, _expect in M:
+        if kind == "relaycmd":
+            h, r = "带", mod.RelayTalkPlugin._strip_command(raw, ("带话", "话筒"))
+        else:
+            h, r = mod.RelayTalkPlugin._parse_text(raw)
+        if h != want_head or (want_rest and r != want_rest):
+            parse_bad.append((raw, h, r, want_head, want_rest))
+    check(f"解析层 {len(M)}/{len(M)} 全通过", not parse_bad, parse_bad[:6])
+
+    run_bad = []
+    for raw, _h, _r, kind, expect in M:
+        cx = _Ctx([reply(RELAY)] if kind in ("relay", "relaycmd") else [])
+        px = mod.RelayTalkPlugin(cx, BOUND)
+        ev = _Event(raw, A)
+        if kind == "relaycmd":
+            await px.cmd_relay(ev)
+        else:
+            await px.cmd_admin(ev)
+        joined = "\n".join(t for _, t in cx.sent)
+        ok = bool(cx.sent) and expect in joined
+        if kind in ("relay", "relaycmd"):
+            ok = ok and any(u == B for u, _ in cx.sent)
+        if not ok:
+            run_bad.append((raw, expect, joined[:100]))
+    check(f"生效层 {len(M)}/{len(M)} 全通过（含真传话）", not run_bad, run_bad[:6])
+
+    # 校验指令本身：运行时逐条核对、零状态改动
+    cx = _Ctx([])
+    px = mod.RelayTalkPlugin(cx, BOUND)
+    await px.cmd_admin(_Event("/话筒 校验", A))
+    v = "\n".join(t for _, t in cx.sent)
+    check("/话筒 校验 报全部通过", "全部通过 ✅" in v and f"{len(M)}/{len(M)}" in v, v)
+    check("/话筒 校验 声明零状态改动", "零状态改动" in v, v)
+    check("/话筒 校验 不改绑定与历史",
+          tuple(px._configured_pair()) == (A, B)
+          and not px.state.get("history") and not px.state.get("turns"),
+          (px._configured_pair(), px.state.get("history")))
+    for alias in ("/话筒 验指令", "/话筒 检查指令", "/话筒 verify_cmds"):
+        cx = _Ctx([])
+        px2 = mod.RelayTalkPlugin(cx, BOUND)
+        await px2.cmd_admin(_Event(alias, A))
+        check(f"校验别名生效: {alias}", "全部通过 ✅" in "\n".join(t for _, t in cx.sent))
+
+    # ==================================================================
+    # 17. At 段污染回归（QQ 聊天截图复现）
+    #    旧版 head 被解析成 [主人(2581793700)]/话筒，除「检查」被关键字
+    #    误救外，自检/判定/分段/潜台词/风格/称呼全掉进「只回清单」兜底
+    # ==================================================================
+    AT_FORMS = [
+        "[主人(2581793700)]/话筒 自检",
+        "[主人(2581793700)]/话筒 检查",
+        "/话筒 检查[主人(2581793700)]",
+        "[主人(2581793700)]/带话 晚安",
+        "[CQ:at,qq=2581793700] /话筒 自检",
+        "@机器人(2581793700) /话筒 自检",
+        "@机器人 /话筒 帮助",
+        "／话筒 自检",
+        "/话筒\u200b自检",
+        "话筒 自检",
+        "自检",
+    ]
+    clean = mod.RelayTalkPlugin._clean_input
+    check("清洗确实删掉 [主人(QQ)]",
+          clean("[主人(2581793700)]/话筒 自检") == "/话筒 自检",
+          clean("[主人(2581793700)]/话筒 自检"))
+    check("清洗保留 [旺柴]", clean("晚安[旺柴]") == "晚安[旺柴]", clean("晚安[旺柴]"))
+    check("清洗保留 [微笑]", "[微笑]" in clean("带话[微笑]"))
+    check("清洗删 CQ at", "[CQ:at" not in clean("[CQ:at,qq=2581793700]/话筒 自检"))
+    check("多个 @ 前缀",
+          mod.RelayTalkPlugin._parse_text("@机器人 @大肥鱼 /话筒 自检")[0] == "自检")
+
+    for raw in AT_FORMS:
+        if "/带话" in raw:
+            # /带话 走 cmd_relay，剥掉指令名后剩下的整体是正文
+            body = mod.RelayTalkPlugin._strip_command(raw, ("带话", "话筒"))
+            check(f"At 形态解析: {raw[:26]}", body == "晚安", (raw, body))
+        else:
+            h, _ = mod.RelayTalkPlugin._parse_text(raw)
+            check(f"At 形态解析: {raw[:26]}", h in mod.ALL_KNOWN_HEADS, (raw, h))
+
+    # 冒号紧贴 / 英文大小写（旧版全部掉兜底）
+    for raw, want in (("/话筒 判定：context", "判定"), ("/话筒 分段：开", "分段"),
+                      ("/话筒 潜台词：开", "潜台词"), ("/话筒 风格：更松弛", "风格"),
+                      ("/话筒 称呼：老泽", "称呼"), ("/话筒 带：我晚点到", "带"),
+                      ("/话筒 STATUS", "状态"), ("/话筒 HELP", "指令")):
+        h, _ = mod.RelayTalkPlugin._parse_text(raw)
+        check(f"冒号/大小写: {raw}", h == want, (raw, h, want))
+
+    # 多来源：message_str 只剩 At 文本，真指令在 Plain 段里
+    ev_obj = _Event("[主人(2581793700)]", A)
+    ev_obj.message_obj = types.SimpleNamespace(
+        message=[_At(2581793700), _Plain("/话筒 自检")])
+    check("消息链跳过 At 只取 Plain",
+          mod.RelayTalkPlugin._plain_from_event(ev_obj) == "/话筒 自检",
+          mod.RelayTalkPlugin._plain_from_event(ev_obj))
+    raw2 = mod.RelayTalkPlugin._command_text(ev_obj)
+    check("_command_text 从消息链捞回真指令", "自检" in raw2, raw2)
+    cx = _Ctx([])
+    px3 = mod.RelayTalkPlugin(cx, BOUND)
+    await px3.cmd_admin(ev_obj)
+    check("端到端：只剩 At 文本也能执行自检",
+          "全部就绪" in "\n".join(t for _, t in cx.sent), cx.sent)
+
+    # /带话 正文洁净：At 段不能被当成要带过去的话
+    cx = _Ctx([reply(RELAY)])
+    px4 = mod.RelayTalkPlugin(cx, BOUND)
+    await px4.cmd_relay(_Event("[主人(2581793700)]/带话 晚安", A))
+    check("/带话 正文不含 At 文本",
+          all("2581793700" not in t and "主人(" not in t for _, t in cx.sent), cx.sent)
+
+    # 二级冒号：尺度：描述 也能落到「尺度」分支
+    cx = _Ctx([])
+    px5 = mod.RelayTalkPlugin(cx, BOUND)
+    await px5.cmd_admin(_Event("/话筒 潜台词 尺度：猜保守点", A))
+    check("潜台词 尺度：描述 生效",
+          "好，之后按这个分寸猜" in "\n".join(t for _, t in cx.sent), cx.sent)
+
+    # 兜底诊断
+    cx = _Ctx([])
+    px6 = mod.RelayTalkPlugin(cx, BOUND)
+    await px6.cmd_admin(_Event("/话筒 瞎写的东西", A))
+    check("未知参数带 [诊断] 清洗后原文",
+          "[诊断]" in "\n".join(t for _, t in cx.sent), cx.sent)
+
+    # ==================================================================
+    # 18. 版本与文档一致性
+    # ==================================================================
+    meta = {}
+    for line in open(os.path.join(ROOT, "metadata.yaml"), encoding="utf-8"):
+        if ":" in line and not line.startswith(" ") and not line.strip().startswith("#"):
+            k, val = line.split(":", 1)
+            meta[k.strip()] = val.strip().strip('"')
+    check("metadata 版本 1.0.2", meta.get("version") == "1.0.2", meta.get("version"))
+    check("register 版本 1.0.2", '"1.0.2"' in src)
+    check("全仓无 3.5.0 残留", "3.5.0" not in src)
+    check("清单含 /话筒 校验", "/话筒 校验" in mod.COMMAND_LIST_TEXT)
+    check("清单含 At 段说明", "主人(QQ号)" in mod.COMMAND_LIST_TEXT or "At 显示段" in mod.COMMAND_LIST_TEXT)
+    readme = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
+    for key in ("/话筒 校验", "COMMAND_MATRIX", "没认出参数"):
+        check(f"README 含「{key}」", key in readme, key)
+    check("README 与矩阵同源说明", "COMMAND_MATRIX" in readme)
 
     print()
     if failures:
