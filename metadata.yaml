@@ -5,9 +5,3 @@ version: 1.0.2
 desc: 在配置里绑定两个会话后，AI 就成了两人之间会自己拿捏分寸的中间人：不用下指令、不用写对象，随口一句「你帮我问问他」就带过去，对方回话也会自动带回。转述不是原文照搬，会保住事实、放软语气，还能看情况替人多说一句关心或打个圆场；可选潜台词翻译与插件内分段，回执每次现写；/话筒 校验 可逐条核对全部指令。未绑定时插件完全休眠，纯闲聊不拦截、不追问。
 repo: 无
 astrbot_version: ">=4.5.7"
-support_platforms:
-  - aiocqhttp    # OneBot v11（NapCat / Lagrange / LLOneBot），已实测
-  - telegram     # Bot API 原生支持向指定 chat 主动发消息
-  - discord      # 原生支持向指定 channel / user 主动发消息
-  - lark         # 飞书应用消息
-  - wecom        # 企业微信应用消息
